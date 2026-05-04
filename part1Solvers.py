@@ -2,7 +2,7 @@ import z3
 from z3 import (Solver, Bool,Bools,Int,Ints, Or, Not, And, Implies, Xor, BitVec, BV2Int, Reals, Distinct, If)
 
 """
-Suppose we want to find a satisfying assignment for the expression (a || !b) && (!a || c). That means we’re looking for values of a, b, and c that make the entire expression evaluate to true.
+Suppose we want to find a satisfying assignment for the expression (a || !b) && (!a || c). That means we're looking for values of a, b, and c that make the entire expression evaluate to true.
 
 One way to approach this is by checking all possible combinations of truth values for a, b, and c. Since each variable can be either true or false, there are 2^3=8 possible combinations.
 
@@ -126,6 +126,8 @@ def proof_by_unsat():
     s = Solver()
 
     # TODO: YOUR CODE HERE
+    s.add(y>0)
+    s.add(x+y <= x) # Negation of the statement we want to prove
 
     match s.check():
         case z3.unsat:
@@ -144,6 +146,14 @@ def demorgans_proof():
         Print "No counterexample can be found, therefore the statement is true" if the given formula f is true, otherwise print "The formula f is false, with counterexample given by: " and the model that shows the formula to be false.
         """
         # TODO: YOUR CODE HERE
+        s = Solver()
+        s.add(Not(f)) # Negation of the statement we want to prove
+        
+        match s.check():
+            case z3.unsat:
+                print("No counterexample can be found, therefore the statement is true")
+            case z3.sat:
+                print(f"The formula f is false, with counterexample given by: {s.model()}")
         pass
 
     prove(demorgan)
@@ -176,6 +186,30 @@ def wedding_planning():
         "There is no acceptable seating arraignment"
     """
     #TODO: YOUR CODE HERE
+    
+    s = Solver()
+    # Define variables for each guest's seat
+    Alice = Int('Alice')
+    Bob = Int('Bob')
+    Charlie = Int('Charlie')
+    # Each guest must sit in a different seat (1, 2, or 3)
+    for guest in [Alice, Bob, Charlie]:
+        s.add(And(guest >= 1, guest <= 3))
+    s.add(Distinct(Alice, Bob, Charlie)) # All guests must sit in different seats
+    # Alice does not sit next to Charlie
+    s.add(Alice - Charlie != 1) # Alice cannot be immediately to the left of Charlie
+    s.add(Charlie - Alice != 1) # Alice cannot be immediately to the right of Charlie
+
+    s.add(Alice != 1) # Alice does not sit on the leftmost chair
+
+    s.add(Bob < Charlie) # Bob does not sit to the right of Charlie (Bob must be in a lower numbered seat than Charlie)
+    # Alice does not sit on the leftmost chair
+    match s.check():
+        case z3.sat:
+            print(f"Acceptable seating arrangement found: {s.model()}")
+        case z3.unsat:
+            print("There is no acceptable seating arrangement")
+
 
 
 
@@ -203,6 +237,28 @@ def sudoku(puzzle):
     Use print_sudoku to print your solution to puzzle or otherwise print "The puzzle is impossible.".
     """
     #TODO: YOUR CODE HERE
+    s = Solver()
+    # Create variables for each cell in the sudoku grid
+    cells = [[Int(f'cell_{i}_{j}') for j in range(9)] for i in range(9)]
+    # Add constraints for the given puzzle
+    for i, row in enumerate(puzzle):
+        for j, value in enumerate(row):
+            if value != 0:
+                s.add(cells[i][j] == value) # Pre-filled cells must match the given values
+            else:
+                s.add(And(cells[i][j] >= 1, cells[i][j] <= 9)) # Unfilled cells must be between 1 and 9 
+    # Add constraints for rows, columns, and 3x3 boxes
+    for i in range(9):
+        s.add(Distinct(cells[i])) # Each row must contain distinct values
+        s.add(Distinct([cells[j][i] for j in range(9)])) # Each column must contain distinct values
+    for box_row in range(3):
+        for box_col in range(3):
+            s.add(Distinct([cells[i][j] for i in range(box_row*3, box_row*3+3) for j in range(box_col*3, box_col*3+3)]))  # Each 3x3 box must contain distinct values
+    match s.check():
+        case z3.sat:
+            print(f"Solution found: {s.model()}")
+        case z3.unsat:
+            print("The puzzle is impossible.")
 
 
 
@@ -239,3 +295,45 @@ def coin_sum(total):
     Hint: You may need to run many related but slightly different model checks.
     """
     # TODO: YOUR CODE HERE
+    s = Solver()
+    s.add(p >= 0, n >= 0, d >= 0, q>= 0, f >= 0, c >= 0) # Number of coins cannot be negative (any number of coins can be used) 
+    s.add(p*1 + n*5 + d*10 + q*25 + f*50 + c*100 == total) # Total value of coins must equal the target amount
+
+    count = 0
+    while s.check() == z3.sat:
+        model = s.model()
+        count += 1
+        # Add a constraint to exclude the current solution in the next iteration
+        s.add(Or(p != model[p], n != model[n], d != model[d], q != model[q], f != model[f], c != model[c])) # Exclude
+    print(f"The number of ways to make $2 is: {count}")
+
+
+
+"""Testing outputs for the above functions"""
+if __name__ == "__main__":
+    print("=== boolean_expressions ===")
+    boolean_expressions()
+
+    print("\n=== integer_expressions ===")
+    integer_expressions()
+
+    print("\n=== real_arithmetic ===")
+    real_artithmetic()
+
+    print("\n=== integer_overflow ===")
+    integer_overflow()  # Note: this one is slow
+
+    print("\n=== proof_by_unsat ===")
+    proof_by_unsat()
+
+    print("\n=== demorgans_proof ===")
+    demorgans_proof()
+
+    print("\n=== wedding_planning ===")
+    wedding_planning()
+
+    print("\n=== sudoku ===")
+    sudoku(instance)  # instance already defined
+
+    print("\n=== coin_sum ===")
+    coin_sum(200)  # 200 cents = $2
