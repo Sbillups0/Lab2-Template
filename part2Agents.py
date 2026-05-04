@@ -260,12 +260,7 @@ class SpellCastingPuzzleWizard(WizardAgent):
             return PuzzleWizard(state).moves
 
         #Generate all assignments by ascending mana cost (so first solvable is cheapest) (False (ice). = 10 mana, True (fire) = 15 mana)
-        all_assignments = sorted(
-            [
-                
-            ],
-            key=lambda assignment: sum(15 if is_fire else 10 for is_fire in assignment.values()) # Sort by total mana cost
-        )
+        all_assignments = sorted(self.generate_assignments(neutral_locations), key=lambda a: sum(15 if v else 10 for v in a.values()))
 
         for assignment in all_assignments:
             path_moves = self._try_assignment(state, assignment)
@@ -275,6 +270,18 @@ class SpellCastingPuzzleWizard(WizardAgent):
         print("SpellCastingPuzzleWizard: No solution found for the given puzzle")
         return []
 
+    def generate_assignments(locations: list):
+        #Generates all possible assignments of True/False for the given locations, sorted by ascending mana cost (False (ice). = 10 mana, True (fire) = 15 mana)
+        assignments = [{}]
+        for loc in locations:
+            new_assignments = []
+            for existing in assignments:
+                fire_version = {**existing, loc: True} # Assign fire to this location
+                ice_version = {**existing, loc: False} # Assign ice to this location
+                new_assignments.append(fire_version)
+                new_assignments.append(ice_version)
+            assignments = new_assignments
+        return assignments
 
 
 
