@@ -230,47 +230,72 @@ class SpellCastingPuzzleWizard(WizardAgent):
             return extract_path(solver.model(), wizard_location, hedge, vedge, R, C)
         return None
     
-    def _build_actions(self, path_moves: list, assignment: dict, wizard_location: Location):
+    def _build_actions(self, path_moves: list, assignment: dict, wizard_location: Location, original_type: dict):
         #Build a list of GameActions (moves and NOW spells) to execute the path_moves while ensuring the stones in the assignment are covered correctly
         actions: list[GameAction] = []
 
-        #Edge case: wizard starts on a stone, need to cast spell on the first turn before moving
-        if wizard_location in assignment:
-            spell = WizardSpells.FIREBALL if assignment[wizard_location] else WizardSpells.FREEZE
-            actions.append(spell)
+        def needs_spell(loc: Location):
+            #Check if the current location needs a spell cast on it according to the assignment 
+            if loc not in assignment:
+                return False
+            is_fire = assignment[loc]
+            original = original_type.get(loc)
+            # Neutral stones always need a spell, fire/ice stones only if we swap types
+            return original is None or original != is_fire
+        def get_spell(loc: Location):
+            return WizardSpells.FIREBALL if assignment[loc] else WizardSpells.FREEZE
+        
+        #Edge case (in case of start on stone that needs a spell)
+        if wizard_location in assignment and needs_spell(wizard_location):
+            actions.append(get_spell(wizard_location))
         current_location = wizard_location
         for move in path_moves:
             actions.append(move)
+            #Update current location based on move
             dr, dc = move.value
             next_location = Location(current_location.row + dr, current_location.col + dc)
-            #Insert spell if we just moved onto a stone that needs to be covered (not when closing loop back to starting location)
-            if next_location in assignment and next_location != wizard_location:
-                spell = WizardSpells.FIREBALL if assignment[next_location] else WizardSpells.FREEZE
-                actions.append(spell)
+
+            #Cast spell on arrival if needed
+            if (next_location != wizard_location and next_location in assignment and needs_spell(next_location)):
+                actions.append(get_spell(next_location))
             current_location = next_location
-        return actions  
+        return actions
     
     def _solve(self, state: GameState):
+        fire_locations = state.get_all_tile_locations(FireStone)
+        ice_locations = state.get_all_tile_locations(IceStone)
         neutral_locations = state.get_all_tile_locations(NeutralStone)
-        N = len(neutral_locations)
         wizard_location = state.active_entity_location
 
-        if N == 0:
-            # No neutral stones, just solve like a normal Maysu puzzle
-            return PuzzleWizard(state).moves
+        #Record the original type of each stone (True for fire, False for ice, None for neutral)
+        original_types = {}
+        for loc in fire_locations:
+            original_types[loc] = True
+        for loc in ice_locations:
+            original_types[loc] = False
+        for loc in neutral_locations:
+            original_types[loc] = None
 
-        #Generate all assignments by ascending mana cost (so first solvable is cheapest) (False (ice). = 10 mana, True (fire) = 15 mana)
-        all_assignments = sorted(self.generate_assignments(neutral_locations), key=lambda a: sum(15 if v else 10 for v in a.values()))
-
+        def assignment_cost(assignment: dict):
+            #Accounts for mana cost for changing stone types from their original state (10 mana to cast freeze on a fire stone, 15 mana to cast fireball on an ice stone, 0 mana to cast either spell on a neutral stone or to keep a stone the same)
+            cost = 0
+            for loc, is_fire in assignment.items():
+                original = original_types[loc]
+                if original is None or original != is_fire:
+                    cost += 15 if is_fire else 10 # If changing to fire, cost is 15 mana, if changing to ice, cost is 10 mana (if original was neutral or different)
+            return cost
+        all_stone_locations = neutral_locations
+        #Sort by cheapest cost first (so first solvable assignment is min mana sol)
+        all_assignments = sorted(self.generate_assignments(all_stone_locations), key=assignment_cost)
         for assignment in all_assignments:
             path_moves = self._try_assignment(state, assignment)
             if path_moves is not None:
-                return self._build_actions(path_moves, assignment, wizard_location)
-        
-        print("SpellCastingPuzzleWizard: No solution found for the given puzzle")
+                return self._build_actions(path_moves, assignment, wizard_location, original_types)
+            
+        print("No solution found for any assignment (should not happen if puzzle is solvable)")
         return []
 
-    def generate_assignments(locations: list):
+    def generate_assignments(self, locations: list):
         #Generates all possible assignments of True/False for the given locations, sorted by ascending mana cost (False (ice). = 10 mana, True (fire) = 15 mana)
         assignments = [{}]
         for loc in locations:
@@ -283,10 +308,6 @@ class SpellCastingPuzzleWizard(WizardAgent):
             assignments = new_assignments
         return assignments
 
-
-
-    
-    
     def react(self, state: GameState) -> GameAction:
         """fire_stones = state.get_all_tile_locations(FireStone)
         ice_stones = state.get_all_tile_locations(IceStone)
