@@ -13,7 +13,7 @@ from agents import WizardAgent
 
 import z3
 from z3 import (Solver, Bool, Bools, Int, Ints, Or, Not, And, Implies, Distinct, If)
-
+from heapq import heappush, heappop
 # Shared Helper Functions
 def build_maysu_solver(state: GameState, fire_locations: list, ice_locations: list):
     #Returns (solver, hedge, vedge, R, C, wizard_location)
@@ -276,22 +276,48 @@ class SpellCastingPuzzleWizard(WizardAgent):
         for loc in neutral_locations:
             original_types[loc] = None
 
-        def assignment_cost(assignment: dict):
-            #Accounts for mana cost for changing stone types from their original state (10 mana to cast freeze on a fire stone, 15 mana to cast fireball on an ice stone, 0 mana to cast either spell on a neutral stone or to keep a stone the same)
+        # for when we want to swap stone types
+        non_neutral = fire_locations + ice_locations    
+        def neutral_assign_cost(assignment):
             cost = 0
             for loc, is_fire in assignment.items():
                 original = original_types[loc]
                 if original is None or original != is_fire:
-                    cost += 15 if is_fire else 10 # If changing to fire, cost is 15 mana, if changing to ice, cost is 10 mana (if original was neutral or different)
+                    cost += 15 if is_fire else 10 # Fire spell costs 15 mana, ice spell costs 10 mana
             return cost
-        all_stone_locations = neutral_locations
-        #Sort by cheapest cost first (so first solvable assignment is min mana sol)
-        all_assignments = sorted(self.generate_assignments(all_stone_locations), key=assignment_cost)
-        for assignment in all_assignments:
-            path_moves = self._try_assignment(state, assignment)
+        
+        neutral_assigns = sorted(self.generate_assignments(neutral_locations), key=neutral_assign_cost) # Generate all possible assignments of fire/ice to neutral stones, sorted by ascending mana cost
+
+        #Now use UCS to expand non-neutral stone type assignments
+        pq = []
+        tb = 0 #tie breaker
+        for i, n_assign in enumerate(neutral_assigns):
+            nc = neutral_assign_cost(n_assign)
+            heappush(pq, (nc, tb, n_assign, frozenset())) # (cost, tie breaker, neutral assignment, non-neutral assignment)
+            tb += 1
+        visited = set()
+        while pq: 
+            cost, _, n_idx, swapped = heappop(pq)
+            key = (n_idx, swapped)
+            if key in visited:
+                continue
+            visited.add(key)
+            #Build the full assignment by applying the neutral assignment and swapping the assigned non-neutral stones
+            full_assignment = dict(neutral_assigns[n_idx])
+            for loc in swapped:
+                full_assignment[loc] = not original_types[loc] # Swap the type of this non-neutral stone
+            path_moves = self._try_assignment(state, full_assignment)
             if path_moves is not None:
-                return self._build_actions(path_moves, assignment, wizard_location, original_types)
-            
+                return self._build_actions(path_moves, full_assignment, wizard_location, original_types)
+            #Expand neighbors by swapping one more non-neutral stone
+            for loc in non_neutral:
+                if loc not in swapped:
+                    original = original_types[loc]
+                    swap_cost = 15 if not original else 10 # Cost to swap this stone (fire to ice or ice to fire)
+                    new_swapped = frozenset(swapped | {loc})
+                    heappush(pq, (cost + swap_cost, tb, n_idx, new_swapped))
+                    tb += 1
+                    
         print("No solution found for any assignment (should not happen if puzzle is solvable)")
         return []
 
