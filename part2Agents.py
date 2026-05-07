@@ -5,8 +5,8 @@ from model import (
     FireStone,
     WizardMoves,
     GameAction,
-    GameState,
     Wall,
+    GameState,
     WizardSpells, NeutralStone,
 )
 from agents import WizardAgent
@@ -47,20 +47,17 @@ def build_maysu_solver(state: GameState, fire_locations: list, ice_locations: li
             return z3.IntVal(0)
         return z3.Sum([If(e, 1, 0) for e in edges])
     
-    #Degree and wall constraints
-    # Every cell is either not on path (degree 0) or fully on path (degree 2)
-    # Wall cells have all incident edges forced to be False (no path can go through them)
+    #Degree constraints
     for r in range(R):
         for c in range(C):
             tile = state.tile_grid[r][c]
             if isinstance(tile, Wall):
-                # Wall cell: no edges can be active
                 for e in get_edges(r, c):
-                    s.add(Not(e))
+                    s.add(Not(e)) # No edges can be active around a wall (not part of the path)
             else:
-                # Non-wall cell: degree must be 0 or 2
                 d = degree(r, c)
-                s.add(Or(d == 0, d == 2))
+                s.add(Or(d == 0, d == 2)) # Path must either not go through this cell (degree 0) or go straight through (degree 2)
+    
     #Stone coverage constraints
     # Every stone must be visited by the path
     for loc in fire_locations + ice_locations:
@@ -238,10 +235,13 @@ class SpellCastingPuzzleWizard(WizardAgent):
             #Check if the current location needs a spell cast on it according to the assignment 
             if loc not in assignment:
                 return False
-            is_fire = assignment[loc]
-            original = original_type.get(loc)
-            # Neutral stones always need a spell, fire/ice stones only if we swap types
-            return original is None or original != is_fire
+            desired = assignment[loc]
+            original = original_type[loc]
+            #Neutral stones must always have a spell cast on them to change them to the desired type, 
+            if original is None:
+                return True
+            #Fire/ice stones only need a spell if their original type does not match the desired type
+            return desired != original
         def get_spell(loc: Location):
             return WizardSpells.FIREBALL if assignment[loc] else WizardSpells.FREEZE
         
@@ -293,7 +293,7 @@ class SpellCastingPuzzleWizard(WizardAgent):
         tb = 0 #tie breaker
         for i, n_assign in enumerate(neutral_assigns):
             nc = neutral_assign_cost(n_assign)
-            heappush(pq, (nc, tb, n_assign, frozenset())) # (cost, tie breaker, neutral assignment, non-neutral assignment)
+            heappush(pq, (nc, tb, i, frozenset())) # (cost, tie breaker, neutral assignment, non-neutral assignment)
             tb += 1
         visited = set()
         while pq: 
@@ -303,9 +303,14 @@ class SpellCastingPuzzleWizard(WizardAgent):
                 continue
             visited.add(key)
             #Build the full assignment by applying the neutral assignment and swapping the assigned non-neutral stones
-            full_assignment = dict(neutral_assigns[n_idx])
-            for loc in swapped:
-                full_assignment[loc] = not original_types[loc] # Swap the type of this non-neutral stone
+            full_assignment = {}
+            for loc in neutral_locations:
+                full_assignment[loc] = neutral_assigns[n_idx][loc] # Start with the neutral assignment
+            for loc in non_neutral:
+                if loc in swapped:
+                    full_assignment[loc] = not original_types[loc] # Swap the type for this non-neutral stone
+                else:
+                    full_assignment[loc] = original_types[loc] # Keep the original type for this non-neutral stone
             path_moves = self._try_assignment(state, full_assignment)
             if path_moves is not None:
                 return self._build_actions(path_moves, full_assignment, wizard_location, original_types)
@@ -313,11 +318,11 @@ class SpellCastingPuzzleWizard(WizardAgent):
             for loc in non_neutral:
                 if loc not in swapped:
                     original = original_types[loc]
-                    swap_cost = 15 if not original else 10 # Cost to swap this stone (fire to ice or ice to fire)
+                    swap_cost = 10 if original is True else 15 # Cost to swap this stone (fire to ice or ice to fire)
                     new_swapped = frozenset(swapped | {loc})
                     heappush(pq, (cost + swap_cost, tb, n_idx, new_swapped))
                     tb += 1
-                    
+
         print("No solution found for any assignment (should not happen if puzzle is solvable)")
         return []
 
